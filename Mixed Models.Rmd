@@ -1,0 +1,150 @@
+libraries
+```{r}
+library(skimr) #for skim()
+library(psych) #for describe		
+library(tidyverse) #for tidy code and ggplot		
+library(cAIC4) #for cAIC		
+library(r2glmm) #for r2beta		
+library(lme4) #for lmer	
+library(lmerTest) #to get singificance test in lmer	
+library(MuMIn) #for r.squaredGLMM
+```
+
+custom functions
+```{r}
+#function for standardized beta coefficients
+stdCoef.merMod <- function(object) {	
+  sdy <- sd(getME(object,"y"))	
+  sdx <- apply(getME(object,"X"), 2, sd)	
+  sc <- fixef(object)*sdx/sdy	
+  se.fixef <- coef(summary(object))[,"Std. Error"]	
+  se <- se.fixef*sdx/sdy	
+  return(data.frame(stdcoef=sc, stdse=se))	
+}	
+#adapted from https://stackoverflow.com/questions/25142901/standardized-coefficients-for-lmer-model	
+```
+
+importing data
+```{r}
+setwd("G:/My Drive/SIMM61/R/Mixed Models")
+hospitala = read_csv("surgery_data_A.csv")
+hospitalb = read_csv("surgery_data_B.csv")
+
+#checking data
+#hospital a
+describe(hospitala)
+skim(hospitala)
+
+#hospital b
+describe(hospitalb)
+skim(hospitalb)
+```
+
+mutating variables
+```{r}
+#sort the hospitals so that 10 is last
+hospitala = hospitala %>% 
+  mutate(hospital = as_factor(hospital)) 
+
+hospitala = hospitala %>%
+  mutate(fct_relevel(hospital, "hospital_10", after = Inf))
+
+#issues
+#absolute values taken of income variable to resolve negative income value
+hospitala = hospitala %>% 
+  mutate(income = as.numeric(abs(household_income)))
+
+#recode sex so there are only to levels 
+hospitala <- hospitala %>% 
+  mutate(sex = fct_collapse(sex, 
+                                female = c("female", "woman"), 
+                                male = "male"))
+
+#hospital B
+hospitala = hospitala %>% 
+  mutate(sex = as_factor(sex))
+```
+
+exploring clustering
+```{r}
+hospitala %>%
+  ggplot() + aes(y = pain, x = cortisol_serum) + geom_point(aes(color = hospital),
+  size = 4) + geom_smooth(method = "lm", se = F)
+
+hospitala %>% 
+  ggplot() + aes(y = pain, x = cortisol_serum, color = hospital) +
+geom_point(size = 4) + geom_smooth(method = "lm", se = F,
+fullrange = TRUE)
+```
+
+linear mixed model for dataset A
+```{r}
+#random intercept
+mmodel <- lmer(pain ~ age 
+               + sex
+               + STAI_trait
+               + pain_cat
+               + mindfulness
+               + cortisol_serum
+               + (1|hospital)
+  , data = hospitala)
+summary(mmodel)
+
+confint(mmodel)
+
+hospitala$pred_1 <- predict(mmodel)
+
+#standardised beta for each predictor
+stdCoef.merMod(mmodel)
+
+#variance explained by fixed effect predictors
+#marginal R2 with CI
+r2beta(mmodel, method = "nsj", data = hospitala)	
+	
+#variance explained by fixed and random effects combined: marginal and conditional R squared values	
+r.squaredGLMM(mmodel, data = hospitala$pred_1)	
+```
+
+Use model 1 on dataset B
+```{r}
+summary(hospitalb$pred_1)
+hospitalb$pred_1 = predict(mmodel, newdata = hospitalb, allow.new.levels = T)
+hospitalb$pred_1
+
+#calculating variance for model 1 on dataset B
+RSSb <- sum((hospitalb$pain - predict(mmodel))^2)	
+mod_mean_b <- lm(pain ~ 1, data = hospitalb)	
+TSSb <- sum((hospitalb$pain - predict(mod_mean_b))^2)	
+1 - (RSSb / TSSb) #-0.3534668
+```
+
+Model 2 on A
+```{r}
+#random intercept
+mmodel2 <- lmer(pain ~ cortisol_serum
+               + (cortisol_serum|hospital)
+  , data = hospitala)
+summary(mmodel2)
+
+hospitala$pred_2 <- predict(mmodel2)
+
+#visualise per hospital
+tiff("mmgraph.tiff", units ="px", width = 600, height = 600)
+ggplot(hospitala) +
+  aes(y = pain, x = cortisol_serum, group = hospital)+		
+  geom_point(aes(color = hospital), size = 4) +		
+  geom_line(color='red', aes(y=pred_2, x=cortisol_serum))+		
+  facet_wrap( ~ hospital, ncol = 5) +
+  labs(title = "Effect of Serum Cortisol on Pain per Hospital", colour = "Hospital Number") +
+  xlab("Serum Cortisol") + ylab("Pain level")
+dev.off()
+```
+
+Model Comparison
+```{r}
+#conditional AIC
+cAIC(mmodel)
+
+cAIC(mmodel2)
+```
+
