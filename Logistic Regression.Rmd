@@ -1,0 +1,333 @@
+libraries
+```{r}
+library(tidyverse) #for tidy code
+library(pscl)	#for pr2
+library(lmtest) #for lrtest
+library(dominanceanalysis) #for dominance analysis
+library(modelsummary) #for msummary()
+library(skimr) #for skim()
+```
+
+loading data
+```{r}
+setwd("G:/My Drive/SIMM61/R/Logit")
+titanic = read_csv("Titanic - training set.csv")
+```
+
+exploring dataset
+```{r}
+summary(titanic)
+skim(titanic)
+```
+
+tidying dataset
+```{r}
+#renaming variables and specifying their class
+titanic = titanic %>% 
+  mutate (id = as.factor(PassengerId),
+          survived = factor(recode(Survived, 
+                                   "1" = "yes",
+                                   "0" = "no")),
+          class = as.factor(Pclass),
+          name = as.factor(Name),
+          sex = as.factor(Sex),
+          age = as.numeric(Age),
+          sib_spouse = as.numeric(SibSp),
+          par_child = as.numeric(Parch),
+          ticket = as.factor(Ticket),
+          fare = as.numeric(Fare),
+          port = as.character(Embarked),
+          family = (sib_spouse + par_child)
+          )
+
+#creating a variable for whether someone had a cabin or not
+titanic$cabin = as.numeric(is.na(titanic$Cabin))
+titanic = titanic  %>% 
+  mutate (cabin = factor(recode(cabin,
+                                "1" = "yes",
+                                "0" = "no")))
+```
+
+visualising
+```{r}
+#how many people were in which class
+ggplot(titanic, aes(x=class)) +	
+    geom_bar()	
+
+#sex
+ggplot(titanic, aes(x=sex)) +	
+    geom_bar()
+
+#siblings / spouses
+ggplot(titanic, aes(x=sib_spouse)) +	
+    geom_histogram()
+
+#parents /children
+ggplot(titanic, aes(x=par_child)) +	
+    geom_histogram()
+
+#fare
+ggplot(titanic, aes(x=fare)) +	
+    geom_histogram()
+
+#port
+ggplot(titanic, aes(x=port)) +	
+    geom_bar()
+
+#cabin
+ggplot(titanic, aes(x=cabin)) +	
+    geom_bar()
+```
+
+visualising potential relationships
+```{r}
+#age
+titanic %>% 	
+  group_by(survived) %>% 	
+  summarize(mean = mean(age, na.rm=T),	
+            sd = sd(age, na.rm=T))	
+	
+ggplot(titanic, aes(y = age, x = survived)) +	
+    geom_violin(aes(fill = survived)) +	
+    geom_boxplot() +	
+    geom_jitter(width = 0.1)
+
+#family
+titanic %>% 	
+  group_by(survived) %>% 	
+  summarize(mean = mean(family, na.rm=T),	
+            sd = sd(family, na.rm=T))	
+	
+ggplot(titanic, aes(y = family, x = survived)) +	
+    geom_violin(aes(fill = survived)) +	
+    geom_boxplot() +	
+    geom_jitter(width = 0.1)
+
+#port of embarkment
+titanic %>% 	
+  group_by(survived, port) %>% 	
+  summarize(n = n()) %>% 	
+  spread(survived, n)	
+	
+ggplot(titanic, aes(x = port, fill = survived)) +	
+  geom_bar()	
+
+#cabin
+titanic %>% 	
+  group_by(survived, cabin) %>% 	
+  summarize(n = n()) %>% 	
+  spread(survived, n)	
+	
+ggplot(titanic, aes(x = cabin, fill = survived)) +	
+  geom_bar()
+
+#sex
+titanic %>% 	
+  group_by(survived, sex) %>% 	
+  summarize(n = n()) %>% 	
+  spread(survived, n)	
+	
+ggplot(titanic, aes(x = sex, fill = survived)) +	
+  geom_bar()
+
+#class
+titanic %>% 	
+  group_by(survived, class) %>% 	
+  summarize(n = n()) %>% 	
+  spread(survived, n)	
+	
+ggplot(titanic, aes(x = class, fill = survived)) +	
+  geom_bar()
+
+#fare
+titanic %>% 	
+  group_by(survived) %>% 	
+  summarize(mean = mean(fare, na.rm=T),	
+            sd = sd(fare, na.rm=T))	
+	
+ggplot(titanic, aes(y = fare, x = survived)) +	
+    geom_violin(aes(fill = survived)) +	
+    geom_boxplot() +	
+    geom_jitter(width = 0.1)
+```
+
+Model 2 = FINAL MODEL 
+```{r}
+log2 = glm(survived ~ sex + class + cabin + par_child + sib_spouse + fare, 	
+           family = binomial(), data = titanic)	
+summary(log2)	
+
+msummary(log2)
+
+#calculate odds ratio
+log_coef <- (log2$coefficients)
+log(abs(log_coef))
+
+#confidence interval
+confint(log2)
+
+```
+
+Model 2
+```{r}
+##without finetuning
+titanic = titanic %>% 	
+  mutate(pred_log2 = predict(log2)) %>% 	
+  mutate(pred_log2 = case_when(pred_log2 <= 0 ~ "no",	
+                               pred_log2 > 0 ~ "yes"))
+
+#coding correct guesses
+titanic = titanic %>%	
+  mutate(correct_prediction2 = case_when(pred_log2 == survived ~ "correct",	
+                                         pred_log2 != survived ~ "incorrect"))	
+#correct categorization
+titanic %>%	
+  group_by(correct_prediction2) %>%	
+  summarise(count = n()) %>%	
+  mutate(freq = count / sum(count))	
+
+#correct categorization for survival prediction
+titanic %>%	
+  group_by(survived) %>%	
+  summarise(count = n())  %>%	
+  mutate(freq = count / sum(count))
+
+titanic %>% 	
+  group_by(survived) %>% 	
+  summarize(n = n()) %>% 	
+  spread(survived, n)	
+	
+titanic %>%	
+  filter(survived == "yes") %>% 	
+  group_by(correct_prediction2) %>%	
+  summarise(count = n()) %>%	
+  mutate(freq = count / sum(count))
+#for those who survive: 60%
+
+titanic %>%	
+  filter(survived == "no") %>% 	
+  group_by(correct_prediction2) %>%	
+  summarise(count = n()) %>%	
+  mutate(freq = count / sum(count))
+#88%
+
+################
+#with finetuning
+titanic = titanic %>% 	
+  mutate(pred_log2_tuned = predict(log2)) %>% 	
+  mutate(pred_log2_tuned = case_when(pred_log2_tuned <= -0.3 ~ "no",	
+                               pred_log2 > -0.3 ~ "yes"))
+
+
+#coding correct guesses
+titanic = titanic %>%	
+  mutate(correct_prediction2_tuned = case_when(pred_log2_tuned == survived ~ "correct",	
+                                         pred_log2_tuned != survived ~ "incorrect"))	
+#correct categorization
+titanic %>%	
+  group_by(correct_prediction2_tuned) %>%	
+  summarise(count = n()) %>%	
+  mutate(freq = count / sum(count))	
+#overall model 78%
+
+titanic %>%	
+  filter(survived == "yes") %>% 	
+  group_by(correct_prediction2_tuned) %>%	
+  summarise(count = n()) %>%	
+  mutate(freq = count / sum(count))
+#for those who survive: 76%
+
+titanic %>%	
+  filter(survived == "no") %>% 	
+  group_by(correct_prediction2_tuned) %>%	
+  summarise(count = n()) %>%	
+  mutate(freq = count / sum(count))
+#those who did not survive 79%
+
+```
+
+assessing model
+```{r}
+#model fit
+pR2(log2)
+#mcfadden = 0.3195957
+
+pR2(log2)["llh"] * -2
+#llh - 2 = 807.4053
+
+#creating the null model
+null_log = glm(survived ~ 1, family = binomial(), data = titanic)	
+summary(null_log)	
+
+#-2LL for null model
+pR2(null_log)["llh"] * -2
+#llh - 2 = 1186.655
+
+#likelihood ratio test 
+#if p-value is significant, the model with predictors is better than the null model 
+lrtest(null_log, log2)
+#<0.001
+
+#AIC
+AIC(null_log, log2)	
+#log2 is a lot smaller than the null model
+```
+
+assessing dominance
+```{r}
+dominance_log2<-dominanceAnalysis(log2)	
+	
+contributionByLevel(dominance_log2, fit.functions="r2.m")	
+#level means compared to the previous model so level 0 is before any were added and then if the specific variable was added as the first on to the model 
+plot(dominance_log2, which.graph ="conditional",fit.function = "r2.m")	
+	
+averageContribution(dominance_log2,fit.functions = "r2.m")
+```
+
+making the model for kate and sue
+```{r}
+#sue: leonardo = father (par_child = 1), cabin = NA, class =  3, age = 4, port = "S", fare = 8
+sue = data.frame(cabin = "no", par_child = 2, class = "3", age = 4, port = "S", fare = 8, sex = "female", sib_spouse = 0)
+
+predict(log2, newdata = sue)
+#1.337603
+
+#convert logOdds to just Odds:
+exp(1.337603) #Odds = 3.8099
+
+#convert to probability: odds/ 1+ odds
+3.8099 / (1 + 3.8099) #= 79.2% of survival
+
+sue_no_leo = data.frame(cabin = "no", par_child = 1, class = "3", age = 4, port = "S", fare = 8, sex = "female", sib_spouse = 0)
+
+predict(log2, newdata = sue_no_leo)
+#1.454359 
+
+#convert logOdds to just Odds:
+exp(1.454359 ) #Odds = 4.281738
+
+#convert to probability: odds/ 1+ odds
+4.281738 / (1 + 4.281738) #= 81.1% of survival
+
+#kate: leonardo = spouse  (sib_spouse = 1), par_child = 1, cabin = NA, class =  3, age == 20, port = "S", fare = 8
+kate = data.frame(cabin = "no", par_child = 1, class = "3", age = 20, port = "S", fare = 8, sex = "female", sib_spouse = 1)
+  
+predict(log2, newdata = kate)
+#1.202145 
+#convert logOdds to just Odds:
+exp(1.202145) #Odds = 3.327246
+
+#convert to probability: odds/ 1+ odds
+3.327246 / (1 + 3.327246) #= 76.9% of survival
+    
+kate_no_leo = data.frame(cabin = "no", par_child = 1, class = "3", age = 20, port = "S", fare = 8, sex = "female", sib_spouse = 0)
+
+predict(log2, newdata = kate_no_leo)
+#1.454359
+
+#convert logOdds to just Odds:
+exp(1.454359) #Odds = 4.281738
+
+#convert to probability: odds/ 1+ odds
+4.281738 / (1 + 4.281738) #= 81.1% of survival
+```
