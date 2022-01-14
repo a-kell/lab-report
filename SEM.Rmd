@@ -1,0 +1,77 @@
+libraries
+```{r}
+library(lavaan) # for SEM fit and model functions	
+library(semPlot) # for semPaths()	
+library(tidyverse) # for tidy code	
+library(MVN) #for mvn()
+library(CompQuadForm) # for mvnorm.kur.test and mvnorm.skew.test (prerequisite)	
+library(ICS) # for mvnorm.kur.test and mvnorm.skew.test	
+library(psychTools) #for the dataset	
+```
+
+loading dataset
+```{r}
+setwd("G:/My Drive/SIMM61/R/Structural Equation Modelling")
+testscores <- holzinger.swineford
+
+describe(testscores)
+skim(testscores)
+#dataset has no errors
+
+#create dataset without missing values
+testscores_na <- testscores %>% 
+  drop_na()
+
+#dataset with only the testscores
+testscores_only <- testscores_na[, c(8, 9, 10, 11, 13, 14, 16, 17, 19, 20)]
+```
+
+tests
+```{r}
+#multivariate normality
+mvn(testscores_only)
+
+#kurtosis and skewness
+mvnorm.kur.test(testscores_only)
+mvnorm.skew.test(testscores_only) 
+```
+
+Model A
+```{r}
+#building the model
+model1 <- "vis_perc =~ t01_visperc + t02_cubes + t03_frmbord + t04_lozenges
+  verb_ab =~ t06_paracomp + t07_sentcomp + t09_wordmean
+  proc_sp =~ t10_addition + t12_countdot + t13_sccaps"
+
+sem_model1 <- sem(model1, data = testscores_only, estimator = "MLM")
+
+#model fit indices
+summary(sem_model1, fit.measures=T)
+
+#model visualisation
+semPaths(sem_model1, residuals = F, whatLabels = "std")
+```
+
+Model B
+```{r}
+#building the model
+model2 <- "vis_perc =~ t01_visperc + t02_cubes + t03_frmbord + t04_lozenges
+  verb_ab =~ t06_paracomp + t07_sentcomp + t09_wordmean
+  proc_sp =~ t10_addition + t12_countdot + t13_sccaps
+  t10_addition ~~ t12_countdot"
+
+sem_model2 <- sem(model2, data = testscores_only, estimator = "MLM")
+
+#standardised estimates
+std_est <- standardizedSolution(sem_model2)
+std_est
+
+#model fit indices including r square values
+summary(sem_model2, fit.measures=T, standardized =T, rsquare=T)
+
+#visualising model
+tiff("sempath.tiff", units ="px",width = 5000, height = 5000)
+semPaths(sem_model2, whatLabels ="std", nCharNodes=3, edge.color = "black", residuals = T)
+dev.off()
+```
+

@@ -1,0 +1,283 @@
+libraries
+```{r}
+library(GGally) #for ggcorr	
+library(corrr) #network_plot	
+library(ggcorrplot)	#for ggcorrplot
+library(psych) 	#for the mixedCor, cortest.bartlett, KMO, fa functions	
+library(GPArotation)#for the psych fa function to have the required rotation functionalities 	
+library(MVN) #for mvn function 	
+library(ICS) #for multivariate skew and kurtosis test
+library(tidyverse) #for tidy code
+library(skimr) #for skim function
+library(car) #for VIF
+library(dominanceanalysis) #for dominance analysis
+```
+
+custom function
+```{r}
+fviz_loadnings_with_cor <- function(mod, axes = 1, loadings_above = 0.4){	
+  require(factoextra)	
+  require(dplyr)	
+  require(ggplot2)	
+	
+	
+if(!is.na(as.character(mod$call$call)[1])){	
+  if(as.character(mod$call$call)[1] == "PCA"){	
+  contrib_and_cov = as.data.frame(rbind(mod[["var"]][["contrib"]], mod[["var"]][["cor"]]))	
+	
+vars = rownames(mod[["var"]][["contrib"]])	
+attribute_type = rep(c("contribution","correlation"), each = length(vars))	
+contrib_and_cov = cbind(contrib_and_cov, attribute_type)	
+contrib_and_cov	
+	
+plot_data = cbind(as.data.frame(cbind(contrib_and_cov[contrib_and_cov[,"attribute_type"] == "contribution",axes], contrib_and_cov[contrib_and_cov[,"attribute_type"] == "correlation",axes])), vars)	
+names(plot_data) = c("contribution", "correlation", "vars")	
+	
+plot_data = plot_data %>% 	
+  mutate(correlation = round(correlation, 2))	
+	
+plot = plot_data %>% 	
+  ggplot() +	
+  aes(x = reorder(vars, contribution), y = contribution, gradient = correlation, label = correlation)+	
+  geom_col(aes(fill = correlation)) +	
+  geom_hline(yintercept = mean(plot_data$contribution), col = "red", lty = "dashed") + scale_fill_gradient2() +	
+  xlab("variable") +	
+  coord_flip() +	
+  geom_label(color = "black", fontface = "bold", position = position_dodge(0.5))	
+	
+	
+}	
+} else if(!is.na(as.character(mod$Call)[1])){	
+  	
+  if(as.character(mod$Call)[1] == "fa"){	
+    loadings_table = mod$loadings %>% 	
+      matrix(ncol = ncol(mod$loadings)) %>% 	
+      as_tibble() %>% 	
+      mutate(variable = mod$loadings %>% rownames()) %>% 	
+      gather(factor, loading, -variable) %>% 	
+      mutate(sign = if_else(loading >= 0, "positive", "negative"))	
+  	
+  if(!is.null(loadings_above)){	
+    loadings_table[abs(loadings_table[,"loading"]) < loadings_above,"loading"] = NA	
+    loadings_table = loadings_table[!is.na(loadings_table[,"loading"]),]	
+  }	
+  	
+  if(!is.null(axes)){	
+  	
+  loadings_table = loadings_table %>% 	
+     filter(factor == paste0("V",axes))	
+  }	
+  	
+  	
+  plot = loadings_table %>% 	
+      ggplot() +	
+      aes(y = loading %>% abs(), x = reorder(variable, abs(loading)), fill = loading, label =       round(loading, 2)) +	
+      geom_col(position = "dodge") +	
+      scale_fill_gradient2() +	
+      coord_flip() +	
+      geom_label(color = "black", fill = "white", fontface = "bold", position = position_dodge(0.5)) +	
+      facet_wrap(~factor) +	
+      labs(y = "Loading strength", x = "Variable")	
+  }	
+}	
+	
+	
+	
+	
+	
+	
+return(plot)	
+	
+}
+```
+
+
+importing dataset
+```{r}
+setwd("G:/My Drive/SIMM61/R/PCA")
+
+animalrights = read_csv("animalrights.csv")
+```
+
+checking data
+```{r}
+summary(animalrights)
+describe(animalrights)
+skim(animalrights)
+
+table(animalrights$sex)
+table(animalrights$party)
+table(animalrights$liberal)
+#the majority of respondents is female, republican and middle on the liberal scale 
+
+#detecting outliers
+outliers <- outlier(animalrights_q)
+
+alph_crit <- .001
+n_nu      <- ncol(animalrights_q) # Number of variables
+crit_val  <- (qchisq(p = 1-(alph_crit), df = n_nu))
+crit_val
+
+outers <- data.frame(outliers) %>% 
+            filter(outliers > crit_val) %>% 
+            arrange(desc(outliers)) 
+outers
+```
+
+
+```{r}
+#code 1 as female 2 as male
+#party: 1 democrat 2 republican 3 other 4 none
+
+animalrights = animalrights  %>% 
+  mutate (sex = factor(recode(sex,
+                                "1" = "female",
+                                "2" = "male")),
+          party = factor(recode(party,
+                                "1"= "democrat",
+                                "2" = "republican",
+                                "3" = "other",
+                                "4" = "none")))
+
+#some questions have one or two missing values
+na_animalrights = animalrights %>% 
+  drop_na()
+#decision made because reduction in cases is very minor and we want to be able to fully use all of the questions for the analysis 
+
+#dataset with only the questions included
+animalrights_q <- na_animalrights[, 1:28]
+
+#creating a new version of the dataset with the items removed for the final analysis
+animalrights_reduced <- animalrights_q[, - c(1, 8, 11, 14, 16, 22, 24, 28)]
+```
+
+checking assumptions
+```{r}
+#Correlation
+ggcorrplot(cor(animalrights_q), p.mat = cor_pmat(animalrights_q), hc.order=TRUE, type='lower')	
+
+#Factorability
+mixedCor <- mixedCor(animalrights_q, c=NULL, correct=0)	
+animalrights_cor <- mixedCor$rho
+
+#correlation plot for reduced dataset
+reduced_mixedCor <- mixedCor(animalrights_reduced, c=NULL, correct = 0)
+animalrights_r_cor <- reduced_mixedCor$rho
+
+#Bartlett test not reliable because n > 5
+cortest.bartlett(animalrights_cor)
+
+#KMO
+KMO(animalrights_cor)
+
+#multivariate normal distribution
+mvn_result <- mvn(animalrights_q, mvnTest = "hz")
+mvn_result$multivariateNormality
+
+mvnorm.kur.test(animalrights_q)
+
+mvnorm.skew.test(animalrights_q)
+```
+
+```{r}
+#checking collinearity in the dataset
+#creating linear model with all questionnaire items
+ARlm <- lm(liberal ~ ar1 + ar2 + ar3 + ar4 + ar5 + ar6 + ar7 + ar9 +ar10 +ar11 + ar12 +ar13 + ar14 + ar15 + ar16 + ar17 + ar18 + ar19 + ar20 + ar21 + ar22 + ar23 +ar24 + ar25 + ar26 + ar27 + ar28, data = na_animalrights)
+
+#checking vif
+vif(ARlm)
+```
+
+choosing number of factors
+```{r}
+#scree test
+VSS.scree(animalrights_cor)	
+
+#kaiser guttman
+eigenvals <- eigen(animalrights_cor)
+eigenvals$values
+
+#parallel test: 5
+#parallel analysis scree plot
+tiff(filename = "Parallel Analysis Scree Plot.tiff")
+fa.parallel(animalrights_cor, n.obs = nrow(na_animalrights), fa = "fa", fm = "pa")
+dev.off()
+
+#VSS and MAP criteria
+nfactors(animalrights_cor, n.obs = nrow(na_animalrights))
+```
+
+factor extraction 1
+```{r}
+#2 factors
+efa <- fa(animalrights_cor, nfactors = 2, fm = "pa")
+efa
+summary(efa)
+```
+
+factor rotation
+```{r}
+#oblique 2 factor no items removed
+efa_promax <- fa(animalrights_cor, nfactors = 2, fm = "pa", rotate = "promax")
+efa_promax
+
+# Sorted communality 
+efa_common <- as.data.frame(sort(efa_promax$communality, decreasing = TRUE))	
+efa_common 
+mean(efa_promax$communality)
+
+#oblique 2 factor 1 item removed
+efa_promax1 <- fa(animalrights_cor[, - 28], nfactors = 2, fm = "pa", rotate = "promax")
+efa_promax1
+mean(efa_promax1$communality)
+
+#final model: rotated oblique 2 factors with 8 items removed
+efa2_promax <- fa(animalrights_r_cor, nfactors = 2, fm = "pa", rotate = "promax")
+efa2_promax
+```
+
+factor analysis
+```{r}
+#Model with 2 factors and items removed
+print(efa2_promax)
+
+#diagram
+fa.diagram(efa2_promax)
+
+#variance
+efa2_promax$Vaccounted
+
+#communality
+efa2_promax_common <- as.data.frame(sort(efa2_promax$communality, decreasing = TRUE))
+efa2_promax_common
+mean(efa2_promax$communality)
+
+#loading strength per item
+fviz_loadnings_with_cor(efa2_promax, axes = 1, loadings_above = 0.4)
+fviz_loadnings_with_cor(efa2_promax, axes = 2, loadings_above = 0.4)
+```
+
+saving factors
+```{r}
+#selecting the scores
+efa2_scores <- factor.scores(animalrights_reduced, efa2_promax)$scores
+
+#saving the scores to the dataset
+na_animalrights$animal_products <- efa2_scores[, "PA2"]
+
+na_animalrights$animal_research <- efa2_scores[, "PA1"]
+
+```
+
+linear model with factors
+```{r}
+#fitting linear model to predict liberal
+animal_lm <- lm(liberal ~ animal_products
+          + animal_research
+            , data = na_animalrights)
+summary(animal_lm)
+
+#dominance analysis to identify which item has more influence
+dominanceAnalysis(animal_lm)
+```
+
